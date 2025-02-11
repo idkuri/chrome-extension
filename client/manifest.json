@@ -1,0 +1,14 @@
+{
+    "name": "Downloader",
+    "description": "Base Level Extension",
+    "version": "1.0",
+    "manifest_version": 3,
+    "permissions": ["tabs"],
+    "host_permissions": ["https://www.developer.chrome.com/*"],
+    "background": {
+        "service_worker": "dist/background.js"
+    },
+    "action": {
+        "default_popup": "hello.html"
+    }
+}
