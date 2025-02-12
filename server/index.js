@@ -55,7 +55,7 @@ const garbageCollector = async (jobID) => {
         catch (err) {
             console.error(`Error cleaning up files for job ${jobID}:`, err);
         }
-    }, 30 * 1000);
+    }, 10 * 60 * 1000);
 };
 
 const captureM3U8 = async (url) => {
