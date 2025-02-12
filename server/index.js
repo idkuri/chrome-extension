@@ -28,7 +28,7 @@ app.get('/:id/', (req, res) => {
     const id = req.params.id;
     const filePath = path.join(__dirname, 'videos', id, 'output.mp4');
     if (writer.existsSync(filePath)) {
-        res.sendFile(filePath);
+        res.download(filePath);
     } else {
         res.status(404).send('File not found');
     }
@@ -36,6 +36,26 @@ app.get('/:id/', (req, res) => {
 
 const generateUniqueId = () => {
     return Math.random().toString(36).substr(2, 9); // You can customize this for longer or more secure IDs
+};
+
+
+const garbageCollector = async (jobID) => {
+    setTimeout(async () => {
+        try {
+            const file_promises = []
+            const video_files = writer.readdirSync(path.join(__dirname, 'videos', jobID));
+            const m3u8_files = writer.readdirSync(path.join(__dirname, 'm3u8', jobID));
+            video_files.map(file => file_promises.push(writer.unlinkSync(path.join(__dirname, 'videos', jobID, file))));
+            m3u8_files.map(file => file_promises.push(writer.unlinkSync(path.join(__dirname, 'm3u8', jobID, file))));
+            await Promise.all(file_promises);
+            writer.rmdirSync(path.join(__dirname, 'videos', jobID));
+            writer.rmdirSync(path.join(__dirname, 'm3u8', jobID));
+            console.log(`Successfully cleaned up files for job ${jobID}`);
+        } 
+        catch (err) {
+            console.error(`Error cleaning up files for job ${jobID}:`, err);
+        }
+    }, 30 * 1000);
 };
 
 const captureM3U8 = async (url) => {
@@ -99,7 +119,6 @@ const downloadM3U8 = async (url, jobID) => {
             });
         }).catch((err) => { console.error(`Error downloading ${url}:`, err); });
     });
-    // return `m3u8/${jobID}/${type + "_" + strings[strings.length - 1]}`;
 }
 
 const runFFMPEG = async (url, jobID) => {
@@ -117,26 +136,30 @@ const runFFMPEG = async (url, jobID) => {
     });
 };
 
-const combineMP4 = async (jobID, length) => { 
-    let files = writer.readdirSync(path.join(__dirname, 'videos', jobID));
-    let map = {video: NaN, audio: NaN};
-    console.log(files)
-    for (let i = 0; i < files.length; i++) {
-        let type = files[i].split("_")
-        if (type[0] === "video") {
-            map.video = files[i];
+const combineMP4 = async (jobID) => { 
+    return new Promise((resolve, reject) => {
+        let files = writer.readdirSync(path.join(__dirname, 'videos', jobID));
+        let map = {video: NaN, audio: NaN};
+        console.log(files)
+        for (let i = 0; i < files.length; i++) {
+            let type = files[i].split("_")
+            if (type[0] === "video") {
+                map.video = files[i];
+            }
+            else if (type[0] === "audio") {
+                map.audio = files[i];
+            }
         }
-        else if (type[0] === "audio") {
-            map.audio = files[i];
-        }
-    }
-    exec(`ffmpeg -i ${path.join(__dirname, 'videos', jobID, `${map.video}`)} -i ${path.join(__dirname, 'videos', jobID, `${map.audio}`)} -c copy ${path.join(__dirname, 'videos', jobID, 'output.mp4')}`, (err, stdout, stderr) => {
-        if (err) {
-            console.error(`Error combining video and audio:`, err);
-            return;
-        }
-        console.log(stdout);
-    });
+        exec(`ffmpeg -i ${path.join(__dirname, 'videos', jobID, `${map.video}`)} -i ${path.join(__dirname, 'videos', jobID, `${map.audio}`)} -c copy ${path.join(__dirname, 'videos', jobID, 'output.mp4')}`, (err, stdout, stderr) => {
+            if (err) {
+                console.error(`Error combining video and audio:`, err);
+                reject(err);
+                return;
+            }
+            console.log(stdout);
+            resolve();
+        });
+    })
 };
 
 app.post('/download', (req, res) => {
@@ -165,8 +188,10 @@ app.post('/download', (req, res) => {
             }
             return Promise.all(m3u8Promises);
         }).then(() => {
-            combineMP4(jobID);
-            res.send(jobID);
+            const combinePromise = combineMP4(jobID).then(() => {
+                res.send(jobID);
+                garbageCollector(jobID);
+            });
         })
         .catch((error) => {
             console.error(error);
