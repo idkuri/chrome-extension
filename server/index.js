@@ -27,8 +27,26 @@ app.get('/', (req, res) => {
 app.get('/:id/', (req, res) => {
     const id = req.params.id;
     const filePath = path.join(__dirname, 'videos', id, 'output.mp4');
+    
     if (writer.existsSync(filePath)) {
-        res.download(filePath);
+        // Set headers for file download
+        res.setHeader('Content-Disposition', `attachment; filename=${id}-output.mp4`);
+        res.setHeader('Content-Type', 'video/mp4');
+        
+        // Stream the file to the client
+        const fileStream = writer.createReadStream(filePath);
+        fileStream.pipe(res);
+        
+        // Handle potential errors during streaming
+        fileStream.on('error', (err) => {
+            console.error('Error while streaming the file:', err);
+            res.status(500).send('Internal Server Error');
+        });
+        
+        // End response when the stream finishes
+        fileStream.on('end', () => {
+            res.end();
+        });
     } else {
         res.status(404).send('File not found');
     }
