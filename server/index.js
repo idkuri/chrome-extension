@@ -1,11 +1,14 @@
 const app = require('express')();
-const PORT = 8080;
+const cors = require('cors');
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 const writer = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
+
+const PORT = 8080;
+app.use(cors());
 
 try {
     writer.mkdirSync(path.join(__dirname, 'm3u8'));
@@ -53,7 +56,7 @@ app.get('/:id/', (req, res) => {
 });
 
 const generateUniqueId = () => {
-    return Math.random().toString(36).substr(2, 9); // You can customize this for longer or more secure IDs
+    return Math.random().toString(36).substr(2, 9);
 };
 
 
@@ -156,9 +159,19 @@ const runFFMPEG = async (url, jobID) => {
 
 const combineMP4 = async (jobID) => { 
     return new Promise((resolve, reject) => {
+        let m3u8_files = writer.readdirSync(path.join(__dirname, 'm3u8', jobID));
         let files = writer.readdirSync(path.join(__dirname, 'videos', jobID));
-        let map = {video: NaN, audio: NaN};
-        console.log(files)
+        let m3u8_map = {video: null, audio: null};
+        let map = {video: null, audio: null};
+        for (let i = 0; i < m3u8_files.length; i++) {
+            let type = m3u8_files[i].split("_")
+            if (type[0] === "video") {
+                m3u8_map.video = m3u8_files[i];
+            }
+            else if (type[0] === "audio") {
+                m3u8_map.audio = m3u8_files[i];
+            }
+        }
         for (let i = 0; i < files.length; i++) {
             let type = files[i].split("_")
             if (type[0] === "video") {
@@ -168,25 +181,40 @@ const combineMP4 = async (jobID) => {
                 map.audio = files[i];
             }
         }
-        exec(`ffmpeg -i ${path.join(__dirname, 'videos', jobID, `${map.video}`)} -i ${path.join(__dirname, 'videos', jobID, `${map.audio}`)} -c copy ${path.join(__dirname, 'videos', jobID, 'output.mp4')}`, (err, stdout, stderr) => {
-            if (err) {
-                console.error(`Error combining video and audio:`, err);
-                reject(err);
-                return;
-            }
-            console.log(stdout);
-            resolve();
-        });
+        if (m3u8_map.audio === null && m3u8_map.video && map.video) {
+            exec(`ffmpeg -i ${path.join(__dirname, 'videos', jobID, `${map.video}`)} -c copy ${path.join(__dirname, 'videos', jobID, 'output.mp4')}`, (err, stdout, stderr) => {
+                if (err) {
+                    console.error(`Error combining video`, err);
+                    reject(err);
+                    return;
+                }
+                console.log(stdout);
+                resolve();
+            });
+        }
+        else if (m3u8_map.video && map.video && m3u8_map.audio && map.audio) {
+            exec(`ffmpeg -i ${path.join(__dirname, 'videos', jobID, `${map.video}`)} -i ${path.join(__dirname, 'videos', jobID, `${map.audio}`)} -c copy ${path.join(__dirname, 'videos', jobID, 'output.mp4')}`, (err, stdout, stderr) => {
+                if (err) {
+                    console.error(`Error combining video and audio:`, err);
+                    reject(err);
+                    return;
+                }
+                console.log(stdout);
+                resolve();
+            });
+
+        }
     })
 };
 
-app.post('/download', (req, res) => {
+app.post('/download', async (req, res) => {
     const link = req.query.url; // Extract URL from query parameters
     if (!link) {
         return res.status(400).send('Missing URL parameter');
     }
 
     const jobID = generateUniqueId();
+    console.log(`Starting download job ${jobID}`);
     while (writer.existsSync(path.join(__dirname, 'm3u8', jobID))) {
         jobID = generateUniqueId();
     }
@@ -206,8 +234,31 @@ app.post('/download', (req, res) => {
             }
             return Promise.all(m3u8Promises);
         }).then(() => {
-            const combinePromise = combineMP4(jobID).then(() => {
-                res.send(jobID);
+            combineMP4(jobID).then(() => {
+                const filePath = path.join(__dirname, 'videos', jobID, 'output.mp4');
+    
+                if (writer.existsSync(filePath)) {
+                    // Set headers for file download
+                    res.setHeader('Content-Disposition', `attachment; filename=${jobID}-output.mp4`);
+                    res.setHeader('Content-Type', 'video/mp4');
+                    
+                    // Stream the file to the client
+                    const fileStream = writer.createReadStream(filePath);
+                    fileStream.pipe(res);
+                    
+                    // Handle potential errors during streaming
+                    fileStream.on('error', (err) => {
+                        console.error('Error while streaming the file:', err);
+                        res.status(500).send('Internal Server Error');
+                    });
+                    
+                    // End response when the stream finishes
+                    fileStream.on('end', () => {
+                        res.end();
+                    });
+                } else {
+                    res.status(404).send('File not found');
+                }
                 garbageCollector(jobID);
             });
         })
