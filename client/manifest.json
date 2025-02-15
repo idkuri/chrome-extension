@@ -1,13 +1,17 @@
 {
     "name": "Downloader",
-    "description": "Base Level Extension",
+    "description": "Adds a download button to media elements on web pages.",
     "version": "1.0",
     "manifest_version": 3,
-    "permissions": ["tabs"],
-    "host_permissions": ["https://www.developer.chrome.com/*"],
-    "background": {
-        "service_worker": "dist/background.js"
-    },
+    "permissions": ["downloads"],
+    "host_permissions": ["<all_urls>"],
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["dist/content.js"],
+            "run_at": "document_idle"
+        }
+    ],
     "action": {
         "default_popup": "hello.html"
     }
